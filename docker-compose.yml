@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  noble-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: noble-api
+    ports:
+      - "8000:8000"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - BASE_URL=http://ollama:11434
+      - MODEL_LLM=gemma4:26b
+      - MODEL_EMBEDDING=qwen3-embedding:8b
+      - EMBEDDING_DIM=4096
+      - DEBUG=false
+    depends_on:
+      - ollama
+    networks:
+      - noble-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: noble-ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - noble-network
+    restart: unless-stopped
+
+networks:
+  noble-network:
+    driver: bridge
+
+volumes:
+  ollama-data:
