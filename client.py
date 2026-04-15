@@ -7,12 +7,16 @@ Shows how to interact with the Noble API from another machine
 import requests
 import json
 import sys
+import os
 from typing import Optional
 
 class NobleAPIClient:
-    def __init__(self, server_url: str = "http://localhost:8000"):
+    def __init__(self, server_url: str = "http://localhost:8000", api_key: Optional[str] = None):
         self.server_url = server_url.rstrip('/')
         self.session = requests.Session()
+        self.api_key = api_key
+        if self.api_key:
+            self.session.headers.update({"X-API-Key": self.api_key})
     
     def health_check(self) -> dict:
         """Check server health"""
@@ -103,10 +107,15 @@ def main():
     # - Remote: http://your-server.com:8000
     
     server_url = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
+    api_key = sys.argv[2] if len(sys.argv) > 2 else os.getenv("API_KEY")
     
-    print(f"Connecting to Noble API at: {server_url}\n")
+    print(f"Connecting to Noble API at: {server_url}")
+    if api_key:
+        print("Authentication: X-API-Key enabled\n")
+    else:
+        print("Authentication: none (protected endpoints may fail)\n")
     
-    client = NobleAPIClient(server_url)
+    client = NobleAPIClient(server_url, api_key=api_key)
     
     # 1. Health check
     print("=" * 50)

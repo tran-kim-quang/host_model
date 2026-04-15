@@ -25,6 +25,8 @@ Server starts on `http://0.0.0.0:8000`
 ### 4. Test the API
 
 ```bash
+API_KEY="replace-with-strong-key"
+
 # Health check
 curl http://localhost:8000/health
 
@@ -33,11 +35,13 @@ curl http://localhost:8000/health
 
 # Test chat
 curl -X POST http://localhost:8000/chat \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello!"}'
 
 # Test embeddings
 curl -X POST http://localhost:8000/embed \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"text": "Hello world"}'
 ```
@@ -45,7 +49,13 @@ curl -X POST http://localhost:8000/embed \
 ### 5. Access from Another Machine
 ```bash
 # Replace with your server IP
+API_KEY="replace-with-strong-key"
 curl http://192.168.1.100:8000/health
+
+curl -X POST http://192.168.1.100:8000/chat \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello from LAN"}'
 ```
 
 ---
@@ -78,20 +88,20 @@ docker-compose down
 
 ### Run with Default Server
 ```bash
-python client.py
+API_KEY=replace-with-strong-key python client.py
 ```
 
 ### Run with Custom Server
 ```bash
-python client.py http://192.168.1.100:8000
+python client.py http://192.168.1.100:8000 replace-with-strong-key
 ```
 
 ---
 
 ## Option 4: Bash Script Test
 ```bash
-bash test.sh
-bash test.sh http://192.168.1.100:8000
+API_KEY=replace-with-strong-key bash test.sh
+bash test.sh http://192.168.1.100:8000 replace-with-strong-key
 ```
 
 ---
@@ -118,7 +128,20 @@ Each machine automatically uses the configured model for its hostname!
 
 ---
 
-## Access Control (Optional Firewall)
+## Access Control (API Key + Firewall)
+
+### API Security (recommended)
+
+Set in `.env`:
+
+```env
+SECURITY_ENABLED=true
+API_KEYS=replace-with-strong-key
+ALLOWED_CLIENT_HOSTNAMES=desktop,server
+ALLOWED_CLIENT_IPS=192.168.1.10,192.168.1.11
+```
+
+Protected endpoints require `X-API-Key`: `/chat`, `/embed`, `/models`, `/config`.
 
 ### Allow port 8000 on Linux
 ```bash
@@ -146,6 +169,10 @@ sudo ufw allow from 192.168.1.0/24 to any port 8000
 - Use IP address, not hostname
 - Check firewall: `sudo ufw status`
 - Ensure API_HOST=0.0.0.0 in .env
+
+### 401 or 403?
+- 401: Missing/invalid API key, add `X-API-Key`
+- 403: Client host/IP not in allowlist
 
 ### Interactive API docs not working?
 - Open: `http://localhost:8000/docs` or `/redoc`

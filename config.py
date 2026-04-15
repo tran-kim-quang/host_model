@@ -17,6 +17,12 @@ class Config:
         
         # Base URL for Ollama
         self.base_url = os.getenv("BASE_URL", "http://localhost:11434")
+
+        # Access control
+        self.security_enabled = os.getenv("SECURITY_ENABLED", "false").lower() == "true"
+        self.api_keys = self._parse_csv_env("API_KEYS")
+        self.allowed_client_hostnames = self._parse_csv_env("ALLOWED_CLIENT_HOSTNAMES")
+        self.allowed_client_ips = self._parse_csv_env("ALLOWED_CLIENT_IPS")
         
         # Default models
         self.default_llm_model = os.getenv("MODEL_LLM", "gemma4:26b")
@@ -26,6 +32,12 @@ class Config:
         # Get hostname-based configuration
         self.llm_model = self._get_model_for_host("MODEL_LLM")
         self.embedding_model = self._get_model_for_host("MODEL_EMBEDDING")
+
+    def _parse_csv_env(self, env_name: str) -> set[str]:
+        """Parse comma-separated values from env into normalized set."""
+        raw = os.getenv(env_name, "")
+        values = [item.strip().lower() for item in raw.split(",") if item.strip()]
+        return set(values)
     
     def _get_model_for_host(self, model_type: str) -> str:
         """
@@ -59,6 +71,10 @@ class Config:
             "llm_model": self.llm_model,
             "embedding_model": self.embedding_model,
             "embedding_dim": self.embedding_dim,
+            "security_enabled": self.security_enabled,
+            "allowed_client_hostnames": sorted(self.allowed_client_hostnames),
+            "allowed_client_ips": sorted(self.allowed_client_ips),
+            "api_key_count": len(self.api_keys),
             "debug": self.debug
         }
 

@@ -6,6 +6,8 @@ FastAPI server for accessing LLM and Embedding models via network with hostname-
 
 ✅ **Network Accessible** - Access from any machine on the LAN
 ✅ **Hostname-Based Model Selection** - Different models per host
+✅ **API Key Authentication** - Protected endpoints require `X-API-Key`
+✅ **Client Allowlist** - Restrict by client hostname/IP
 ✅ **LLM Chat** - Chat with LLM models
 ✅ **Embeddings** - Generate text embeddings
 ✅ **Auto Documentation** - Interactive API docs at `/docs`
@@ -47,6 +49,26 @@ EMBEDDING_DIM=4096
 
 DEBUG=false
 ```
+
+### Security Settings (Recommended)
+
+```env
+SECURITY_ENABLED=true
+
+# Comma-separated API keys (sent via X-API-Key)
+API_KEYS=replace-with-strong-key
+
+# Optional allowlist by client hostname (reverse DNS)
+ALLOWED_CLIENT_HOSTNAMES=desktop,server
+
+# Optional allowlist by client IP (recommended)
+ALLOWED_CLIENT_IPS=192.168.1.10,192.168.1.11
+```
+
+Notes:
+- `/chat`, `/embed`, `/models`, `/config` require `X-API-Key` when `SECURITY_ENABLED=true`.
+- `/health` is open for monitoring.
+- If reverse DNS is not reliable, prefer `ALLOWED_CLIENT_IPS`.
 
 ### Hostname-Based Model Selection
 
@@ -106,14 +128,16 @@ Response:
 
 ### 2. Get Configuration
 ```bash
-curl http://localhost:8000/config
+curl http://localhost:8000/config \
+  -H "X-API-Key: replace-with-strong-key"
 ```
 
 Shows current configuration loaded for this hostname.
 
 ### 3. List Available Models
 ```bash
-curl http://localhost:8000/models
+curl http://localhost:8000/models \
+  -H "X-API-Key: replace-with-strong-key"
 ```
 
 Lists all models available in Ollama.
@@ -121,6 +145,7 @@ Lists all models available in Ollama.
 ### 4. Chat with LLM
 ```bash
 curl -X POST http://localhost:8000/chat \
+  -H "X-API-Key: replace-with-strong-key" \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Hello, how are you?",
@@ -149,6 +174,7 @@ Response:
 ### 5. Generate Embeddings
 ```bash
 curl -X POST http://localhost:8000/embed \
+  -H "X-API-Key: replace-with-strong-key" \
   -H "Content-Type: application/json" \
   -d '{
     "text": "This is a sample text for embedding"
@@ -188,9 +214,12 @@ Open browser: `http://localhost:8000/docs`
 2. **Make requests from other machine**:
    ```bash
    # Replace 192.168.1.100 with your server IP
+   API_KEY="replace-with-strong-key"
+
    curl http://192.168.1.100:8000/health
    
    curl -X POST http://192.168.1.100:8000/chat \
+     -H "X-API-Key: $API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"message": "Hello"}'
    ```
@@ -211,6 +240,8 @@ sudo ufw allow 8000
 import requests
 
 API_URL = "http://192.168.1.100:8000"
+API_KEY = "replace-with-strong-key"
+HEADERS = {"X-API-Key": API_KEY}
 
 # Health check
 response = requests.get(f"{API_URL}/health")
@@ -221,14 +252,14 @@ chat_data = {
     "message": "What is machine learning?",
     "temperature": 0.7
 }
-response = requests.post(f"{API_URL}/chat", json=chat_data)
+response = requests.post(f"{API_URL}/chat", json=chat_data, headers=HEADERS)
 print(response.json())
 
 # Embeddings
 embed_data = {
     "text": "Machine learning is a subset of artificial intelligence"
 }
-response = requests.post(f"{API_URL}/embed", json=embed_data)
+response = requests.post(f"{API_URL}/embed", json=embed_data, headers=HEADERS)
 print(response.json())
 ```
 
@@ -247,6 +278,15 @@ print(response.json())
 - Check firewall: `sudo ufw allow 8000`
 - Use server's IP address, not localhost
 - Ensure API_HOST=0.0.0.0 in .env
+
+### 401 Invalid or missing API key
+- Ensure `X-API-Key` header is sent on protected endpoints
+- Ensure key exists in `API_KEYS` in `.env`
+
+### 403 Client IP/hostname is not allowed
+- Add client IP to `ALLOWED_CLIENT_IPS`
+- Or add client hostname to `ALLOWED_CLIENT_HOSTNAMES`
+- Prefer IP allowlist if reverse DNS is not stable
 
 ### CORS errors
 - CORS is enabled for all origins by default

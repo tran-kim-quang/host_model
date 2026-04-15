@@ -9,6 +9,8 @@ Tài liệu này giúp bạn kết nối từ máy tính khác trên cùng mạn
 - ✅ Server đang chạy trên máy có Ollama
 - ✅ Máy client và server cùng chung mạng LAN
 - ✅ Firewall cho phép cổng 8000
+- ✅ Client có API key hợp lệ (X-API-Key)
+- ✅ Client nằm trong allowlist hostname/IP (nếu bật)
 
 ---
 
@@ -84,6 +86,30 @@ curl http://192.168.1.100:8000/health
 - Kiểm tra server có đang chạy không
 - Kiểm tra firewall
 
+❌ **Nếu lỗi 401 hoặc 403:**
+- 401: Thiếu hoặc sai `X-API-Key`
+- 403: Hostname/IP client chưa nằm trong allowlist
+
+---
+
+## 3.1️⃣ Bước 3.1: Cấu hình bảo mật trên server
+
+Trong file `.env` của server:
+
+```env
+SECURITY_ENABLED=true
+API_KEYS=replace-with-strong-key
+
+# Chỉ cho phép các client cụ thể
+ALLOWED_CLIENT_HOSTNAMES=desktop,server
+ALLOWED_CLIENT_IPS=192.168.1.10,192.168.1.11
+```
+
+Lưu ý:
+- Endpoint cần key: `/chat`, `/embed`, `/models`, `/config`
+- Endpoint mở: `/health`
+- Nếu reverse DNS không ổn định, ưu tiên allowlist theo IP
+
 ---
 
 ## 4️⃣ Cách 1: Gọi API bằng CURL
@@ -92,15 +118,21 @@ curl http://192.168.1.100:8000/health
 
 ```bash
 SERVER_IP="192.168.1.100"
+API_KEY="replace-with-strong-key"
 
 # Health check
 curl http://$SERVER_IP:8000/health
+
+# Endpoint bảo vệ
+curl http://$SERVER_IP:8000/config \
+  -H "X-API-Key: $API_KEY"
 ```
 
 ### Chat với LLM
 
 ```bash
 curl -X POST http://192.168.1.100:8000/chat \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Xin chào! Bạn là ai?",
@@ -122,6 +154,7 @@ curl -X POST http://192.168.1.100:8000/chat \
 
 ```bash
 curl -X POST http://192.168.1.100:8000/embed \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "text": "Tôi yêu lập trình với Python"
@@ -141,13 +174,15 @@ curl -X POST http://192.168.1.100:8000/embed \
 ### Xem cấu hình hiện tại
 
 ```bash
-curl http://192.168.1.100:8000/config
+curl http://192.168.1.100:8000/config \
+  -H "X-API-Key: $API_KEY"
 ```
 
 ### Liệt kê models có sẵn
 
 ```bash
-curl http://192.168.1.100:8000/models
+curl http://192.168.1.100:8000/models \
+  -H "X-API-Key: $API_KEY"
 ```
 
 ---
@@ -163,6 +198,8 @@ import requests
 SERVER_IP = "192.168.1.100"
 SERVER_PORT = 8000
 API_URL = f"http://{SERVER_IP}:{SERVER_PORT}"
+API_KEY = "replace-with-strong-key"
+HEADERS = {"X-API-Key": API_KEY}
 
 # 1. Kiểm tra trạng thái
 print("=== Health Check ===")
@@ -172,7 +209,7 @@ print()
 
 # 2. Xem cấu hình
 print("=== Configuration ===")
-response = requests.get(f"{API_URL}/config")
+response = requests.get(f"{API_URL}/config", headers=HEADERS)
 print(response.json())
 print()
 
@@ -183,7 +220,7 @@ chat_data = {
     "temperature": 0.7,
     "num_predict": 300
 }
-response = requests.post(f"{API_URL}/chat", json=chat_data)
+response = requests.post(f"{API_URL}/chat", json=chat_data, headers=HEADERS)
 result = response.json()
 print(f"Model: {result['model']}")
 print(f"Response: {result['response']}")
@@ -194,7 +231,7 @@ print("=== Embeddings ===")
 embed_data = {
     "text": "Machine learning là gì?"
 }
-response = requests.post(f"{API_URL}/embed", json=embed_data)
+response = requests.post(f"{API_URL}/embed", json=embed_data, headers=HEADERS)
 result = response.json()
 print(f"Model: {result['model']}")
 print(f"Dimension: {result['dimension']}")
@@ -246,7 +283,8 @@ Server trên "gpu-node"   → dùng llama2:70b
 
 Khi client gọi API:
 ```bash
-curl http://192.168.1.100:8000/config
+curl http://192.168.1.100:8000/config \
+  -H "X-API-Key: replace-with-strong-key"
 ```
 
 **Response sẽ chỉ rõ:**
@@ -268,9 +306,11 @@ curl http://192.168.1.100:8000/config
 import requests
 
 API_URL = "http://192.168.1.100:8000"
+API_KEY = "replace-with-strong-key"
+HEADERS = {"X-API-Key": API_KEY}
 
 # Lấy thông tin server
-config = requests.get(f"{API_URL}/config").json()
+config = requests.get(f"{API_URL}/config", headers=HEADERS).json()
 server_hostname = config["info"]["hostname"]
 current_model = config["info"]["llm_model"]
 
@@ -280,7 +320,8 @@ print(f"Current model: {current_model}")
 # Chat sẽ tự dùng model phù hợp
 chat_response = requests.post(
     f"{API_URL}/chat",
-    json={"message": "Hello"}
+  json={"message": "Hello"},
+  headers=HEADERS
 ).json()
 
 print(f"Used model: {chat_response['model']}")
@@ -559,6 +600,13 @@ app.add_middleware(
 )
 ```
 
+### Và bắt buộc API key
+
+```env
+SECURITY_ENABLED=true
+API_KEYS=replace-with-strong-key
+```
+
 ---
 
 ## 🎯 Checklist
@@ -569,6 +617,9 @@ Trước khi kết nối:
 - [ ] Ollama đang chạy (`ollama serve`)
 - [ ] Tìm được IP server (`hostname -I` / `ifconfig`)
 - [ ] Firewall mở cổng 8000 (`sudo ufw allow 8000`)
+- [ ] Đã cấu hình `SECURITY_ENABLED=true` và `API_KEYS`
+- [ ] Client gửi header `X-API-Key`
+- [ ] Client nằm trong `ALLOWED_CLIENT_HOSTNAMES` hoặc `ALLOWED_CLIENT_IPS`
 - [ ] Test ping thành công (`ping 192.168.1.x`)
 - [ ] Health check thành công (`curl http://192.168.1.x:8000/health`)
 

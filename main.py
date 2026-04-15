@@ -1,5 +1,7 @@
-from fastapi import FastAPI, HTTPException
+import socket
+from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 import httpx
 import logging
 from pydantic import BaseModel
@@ -15,6 +17,8 @@ app = FastAPI(
     description="API Server for LLM and Embedding Models",
     version="1.0.0"
 )
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 # Enable CORS for cross-network access
 app.add_middleware(
@@ -62,6 +66,52 @@ class HealthResponse(BaseModel):
     embedding_model: str
     api_version: str
 
+
+def _resolve_client_hostnames(client_ip: str) -> set[str]:
+    """Resolve possible hostnames from client IP using reverse DNS."""
+    if not client_ip:
+        return set()
+
+    try:
+        primary, aliases, _ = socket.gethostbyaddr(client_ip)
+        names = {primary.lower()}
+        names.update(alias.lower() for alias in aliases)
+
+        # Include short hostnames (before first dot) for easier matching in env.
+        short_names = {name.split(".")[0] for name in names if "." in name}
+        names.update(short_names)
+        return names
+    except Exception:
+        return set()
+
+
+async def authorize_request(
+    request: Request,
+    api_key: str = Security(api_key_header),
+) -> None:
+    """Authorize request by API key and optional hostname/IP allowlist."""
+    if not config.security_enabled:
+        return
+
+    if not config.api_keys:
+        raise HTTPException(
+            status_code=500,
+            detail="Security enabled but API_KEYS is empty",
+        )
+
+    if not api_key or api_key.lower() not in config.api_keys:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+    client_ip = request.client.host if request.client else ""
+
+    if config.allowed_client_ips and client_ip not in config.allowed_client_ips:
+        raise HTTPException(status_code=403, detail="Client IP is not allowed")
+
+    if config.allowed_client_hostnames:
+        client_hosts = _resolve_client_hostnames(client_ip)
+        if not client_hosts.intersection(config.allowed_client_hostnames):
+            raise HTTPException(status_code=403, detail="Client hostname is not allowed")
+
 # ============ Endpoints ============
 
 @app.get("/health", response_model=HealthResponse)
@@ -86,7 +136,7 @@ async def health_check():
         )
 
 @app.get("/models", response_model=dict)
-async def get_models():
+async def get_models(_: None = Depends(authorize_request)):
     """Get available models from Ollama"""
     try:
         async with httpx.AsyncClient() as client:
@@ -104,7 +154,7 @@ async def get_models():
         raise HTTPException(status_code=503, detail="Cannot connect to Ollama")
 
 @app.get("/config", response_model=dict)
-async def get_config():
+async def get_config(_: None = Depends(authorize_request)):
     """Get current configuration (hostname-based)"""
     return {
         "info": config.get_info(),
@@ -112,7 +162,7 @@ async def get_config():
     }
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, _: None = Depends(authorize_request)):
     """
     Chat with LLM model
     - Uses hostname-based model selection
@@ -155,7 +205,7 @@ async def chat(request: ChatRequest):
         )
 
 @app.post("/embed", response_model=EmbedResponse)
-async def embed(request: EmbedRequest):
+async def embed(request: EmbedRequest, _: None = Depends(authorize_request)):
     """
     Generate embeddings using embedding model
     - Uses hostname-based model selection
@@ -202,10 +252,10 @@ async def root():
         "hostname": config.hostname,
         "endpoints": {
             "health": "/health - Check server status",
-            "config": "/config - View current configuration",
-            "models": "/models - List available models",
-            "chat": "/chat - Chat with LLM",
-            "embed": "/embed - Generate embeddings",
+            "config": "/config - View current configuration (auth required)",
+            "models": "/models - List available models (auth required)",
+            "chat": "/chat - Chat with LLM (auth required)",
+            "embed": "/embed - Generate embeddings (auth required)",
             "docs": "/docs - Interactive API documentation"
         }
     }
