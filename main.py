@@ -37,7 +37,6 @@ class HealthResponse(BaseModel):
     base_url: str
     api_version: str
 
-
 def _resolve_client_hostnames(client_ip: str) -> set[str]:
     """Resolve possible hostnames from client IP using reverse DNS."""
     if not client_ip:
