@@ -45,53 +45,38 @@ class NobleAPIClient:
         except Exception as e:
             return {"error": str(e)}
     
-    def chat(
-        self,
-        message: str,
-        model: Optional[str] = None,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
-        top_k: int = 40,
-        num_predict: int = 512
-    ) -> dict:
-        """Chat with LLM"""
+    def ollama_request(self, path: str, payload: Optional[dict] = None, method: str = "POST") -> dict:
+        """Send direct request to Ollama through authenticated gateway."""
         try:
-            payload = {
-                "message": message,
-                "temperature": temperature,
-                "top_p": top_p,
-                "top_k": top_k,
-                "num_predict": num_predict
-            }
-            if model:
-                payload["model"] = model
-            
-            response = self.session.post(
-                f"{self.server_url}/chat",
+            clean_path = path.lstrip("/")
+            response = self.session.request(
+                method=method,
+                url=f"{self.server_url}/ollama/{clean_path}",
                 json=payload,
-                timeout=60
+                timeout=120
             )
             response.raise_for_status()
             return response.json()
         except Exception as e:
             return {"error": str(e)}
-    
-    def embed(self, text: str, model: Optional[str] = None) -> dict:
-        """Generate embeddings"""
-        try:
-            payload = {"text": text}
-            if model:
-                payload["model"] = model
-            
-            response = self.session.post(
-                f"{self.server_url}/embed",
-                json=payload,
-                timeout=60
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            return {"error": str(e)}
+
+    def generate(self, model: str, prompt: str, **kwargs) -> dict:
+        """Generate text with full control over Ollama payload fields."""
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            **kwargs,
+        }
+        return self.ollama_request("api/generate", payload=payload, method="POST")
+
+    def embeddings(self, model: str, text: str, **kwargs) -> dict:
+        """Create embeddings with full control over Ollama payload fields."""
+        payload = {
+            "model": model,
+            "prompt": text,
+            **kwargs,
+        }
+        return self.ollama_request("api/embeddings", payload=payload, method="POST")
 
 
 def print_json(data: dict, indent: int = 2):
@@ -127,7 +112,7 @@ def main():
     
     # 2. Get configuration
     print("=" * 50)
-    print("2. Configuration (Hostname-based)")
+    print("2. Configuration")
     print("=" * 50)
     result = client.get_config()
     print_json(result)
@@ -140,33 +125,40 @@ def main():
     result = client.list_models()
     if "error" not in result:
         print(f"Current hostname: {result.get('hostname')}")
-        print(f"Current LLM: {result.get('current_llm')}")
-        print(f"Current Embedding: {result.get('current_embedding')}")
         if "available_models" in result:
             print(f"Available models: {len(result['available_models'].get('models', []))} models")
     else:
         print_json(result)
     print()
     
-    # 4. Chat
+    models = result.get("available_models", {}).get("models", []) if isinstance(result, dict) else []
+    model_name = models[0]["name"] if models else "gemma4:26b"
+
+    # 4. Generate
     print("=" * 50)
-    print("4. Chat Test")
+    print("4. Generate Test (Proxy -> Ollama)")
     print("=" * 50)
+    print(f"Model: {model_name}")
     print("Query: 'What is API?'")
-    result = client.chat("What is API? (answer in 2 sentences)")
+    result = client.generate(
+        model=model_name,
+        prompt="What is API? (answer in 2 sentences)",
+        stream=False,
+        num_predict=120,
+    )
     print_json(result)
     print()
     
     # 5. Embeddings
     print("=" * 50)
-    print("5. Embedding Test")
+    print("5. Embedding Test (Proxy -> Ollama)")
     print("=" * 50)
     print("Text: 'API is a software interface'")
-    result = client.embed("API is a software interface")
+    embedding_model = "qwen3-embedding:8b"
+    result = client.embeddings(embedding_model, "API is a software interface")
     if "error" not in result:
         embedding = result.get("embedding", [])
-        print(f"Model: {result.get('model')}")
-        print(f"Hostname: {result.get('hostname')}")
+        print(f"Model: {embedding_model}")
         print(f"Embedding dimension: {result.get('dimension')}")
         print(f"First 5 values: {embedding[:5]}")
     else:

@@ -39,29 +39,32 @@ echo ""
 
 # 3. List Models
 echo -e "${BLUE}3. Available Models${NC}"
-curl -s "${AUTH_HEADER[@]}" "$SERVER_URL/models" | jq '.hostname, .current_llm, .current_embedding'
+curl -s "${AUTH_HEADER[@]}" "$SERVER_URL/models" | jq '.hostname, .available_models.models | length'
 echo ""
 
-# 4. Chat
-echo -e "${BLUE}4. Chat Request${NC}"
-curl -s -X POST "$SERVER_URL/chat" \
+# 4. Generate via Ollama proxy
+echo -e "${BLUE}4. Generate Request (Proxy -> Ollama)${NC}"
+curl -s -X POST "$SERVER_URL/ollama/api/generate" \
   "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "What is FastAPI? Answer in one sentence.",
+    "model": "gemma4:26b",
+    "prompt": "What is FastAPI? Answer in one sentence.",
     "temperature": 0.7,
-    "num_predict": 100
+    "num_predict": 100,
+    "stream": false
   }' | jq .
 echo ""
 
-# 5. Embeddings
-echo -e "${BLUE}5. Embedding Request${NC}"
-curl -s -X POST "$SERVER_URL/embed" \
+# 5. Embeddings via Ollama proxy
+echo -e "${BLUE}5. Embedding Request (Proxy -> Ollama)${NC}"
+curl -s -X POST "$SERVER_URL/ollama/api/embeddings" \
   "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "FastAPI is a modern web framework"
-  }' | jq '{model: .model, hostname: .hostname, dimension: .dimension, embedding_sample: .embedding[0:5]}'
+    "model": "qwen3-embedding:8b",
+    "prompt": "FastAPI is a modern web framework"
+  }' | jq '{dimension: .dimension, embedding_sample: .embedding[0:5]}'
 echo ""
 
 echo -e "${GREEN}✓ Test completed!${NC}"

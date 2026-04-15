@@ -1,11 +1,11 @@
 import socket
 from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import APIKeyHeader
 import httpx
 import logging
 from pydantic import BaseModel
-from typing import Optional, List
 from config import config
 
 # Configure logging
@@ -29,41 +29,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============ Request/Response Models ============
-
-class ChatRequest(BaseModel):
-    message: str
-    model: Optional[str] = None
-    temperature: float = 0.7
-    top_p: float = 0.9
-    top_k: int = 40
-    num_predict: int = 512
-    stream: bool = False
-
-class ChatResponse(BaseModel):
-    response: str
-    model: str
-    hostname: str
-
-class EmbedRequest(BaseModel):
-    text: str
-    model: Optional[str] = None
-
-class EmbedResponse(BaseModel):
-    embedding: List[float]
-    model: str
-    hostname: str
-    dimension: int
-
-class ModelInfo(BaseModel):
-    name: str
-    type: str
+# ============ Response Models ============
 
 class HealthResponse(BaseModel):
     status: str
     hostname: str
-    llm_model: str
-    embedding_model: str
+    base_url: str
     api_version: str
 
 
@@ -124,8 +95,7 @@ async def health_check():
                 return HealthResponse(
                     status="healthy",
                     hostname=config.hostname,
-                    llm_model=config.llm_model,
-                    embedding_model=config.embedding_model,
+                    base_url=config.base_url,
                     api_version="1.0.0"
                 )
     except Exception as e:
@@ -145,8 +115,6 @@ async def get_models(_: None = Depends(authorize_request)):
                 models = response.json()
                 return {
                     "hostname": config.hostname,
-                    "current_llm": config.llm_model,
-                    "current_embedding": config.embedding_model,
                     "available_models": models
                 }
     except Exception as e:
@@ -155,93 +123,57 @@ async def get_models(_: None = Depends(authorize_request)):
 
 @app.get("/config", response_model=dict)
 async def get_config(_: None = Depends(authorize_request)):
-    """Get current configuration (hostname-based)"""
+    """Get current server/security configuration"""
     return {
         "info": config.get_info(),
-        "message": "Configuration loaded based on hostname"
+        "message": "Server acts as authenticated gateway to Ollama"
     }
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, _: None = Depends(authorize_request)):
+@app.api_route("/ollama/{ollama_path:path}", methods=["GET", "POST"])
+async def proxy_to_ollama(
+    ollama_path: str,
+    request: Request,
+    _: None = Depends(authorize_request),
+):
     """
-    Chat with LLM model
-    - Uses hostname-based model selection
-    - If model not specified, uses configured default for this host
+    Authenticated proxy endpoint.
+    Client has full control over model selection and Ollama payload.
     """
-    model = request.model or config.llm_model
-    
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            payload = {
-                "model": model,
-                "prompt": request.message,
-                "temperature": request.temperature,
-                "top_p": request.top_p,
-                "top_k": request.top_k,
-                "num_predict": request.num_predict,
-                "stream": False
-            }
-            
-            response = await client.post(
-                f"{config.base_url}/api/generate",
-                json=payload
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                return ChatResponse(
-                    response=result.get("response", ""),
-                    model=model,
-                    hostname=config.hostname
-                )
-            else:
-                raise Exception(f"Model responded with {response.status_code}")
-                
-    except Exception as e:
-        logger.error(f"Chat request failed: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail=f"Failed to get response from model '{model}': {str(e)}"
-        )
+    clean_path = ollama_path.lstrip("/")
+    if not clean_path.startswith("api/"):
+        raise HTTPException(status_code=400, detail="Only paths under /api are allowed")
 
-@app.post("/embed", response_model=EmbedResponse)
-async def embed(request: EmbedRequest, _: None = Depends(authorize_request)):
-    """
-    Generate embeddings using embedding model
-    - Uses hostname-based model selection
-    - If model not specified, uses configured default for this host
-    """
-    model = request.model or config.embedding_model
-    
+    upstream_url = f"{config.base_url.rstrip('/')}/{clean_path}"
+    query_params = dict(request.query_params)
+    body = await request.body()
+
+    upstream_headers = {}
+    if request.headers.get("content-type"):
+        upstream_headers["content-type"] = request.headers["content-type"]
+
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            payload = {
-                "model": model,
-                "prompt": request.text
-            }
-            
-            response = await client.post(
-                f"{config.base_url}/api/embeddings",
-                json=payload
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            upstream_response = await client.request(
+                method=request.method,
+                url=upstream_url,
+                params=query_params,
+                content=body,
+                headers=upstream_headers,
             )
-            
-            if response.status_code == 200:
-                result = response.json()
-                return EmbedResponse(
-                    embedding=result.get("embedding", []),
-                    model=model,
-                    hostname=config.hostname,
-                    dimension=len(result.get("embedding", []))
-                )
-            else:
-                raise Exception(f"Model responded with {response.status_code}")
-                
     except Exception as e:
-        logger.error(f"Embed request failed: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail=f"Failed to get embeddings from model '{model}': {str(e)}"
-        )
+        logger.error(f"Proxy request failed to {upstream_url}: {e}")
+        raise HTTPException(status_code=503, detail="Cannot connect to Ollama")
+
+    response_headers = {}
+    content_type = upstream_response.headers.get("content-type")
+    if content_type:
+        response_headers["content-type"] = content_type
+
+    return Response(
+        content=upstream_response.content,
+        status_code=upstream_response.status_code,
+        headers=response_headers,
+    )
 
 @app.get("/")
 async def root():
@@ -250,12 +182,14 @@ async def root():
         "name": "Noble API",
         "version": "1.0.0",
         "hostname": config.hostname,
+        "mode": "authenticated-ollama-gateway",
         "endpoints": {
             "health": "/health - Check server status",
             "config": "/config - View current configuration (auth required)",
             "models": "/models - List available models (auth required)",
-            "chat": "/chat - Chat with LLM (auth required)",
-            "embed": "/embed - Generate embeddings (auth required)",
+            "proxy": "/ollama/{path} - Proxy to Ollama API with full client control (auth required)",
+            "example_generate": "POST /ollama/api/generate",
+            "example_embeddings": "POST /ollama/api/embeddings",
             "docs": "/docs - Interactive API documentation"
         }
     }
@@ -264,11 +198,14 @@ async def root():
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
-    return {
-        "error": exc.detail,
-        "status_code": exc.status_code,
-        "hostname": config.hostname
-    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "status_code": exc.status_code,
+            "hostname": config.hostname
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn
