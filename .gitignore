@@ -23,3 +23,6 @@ TestResults.xml
 # Python cache
 __pycache__/
 *.pyc
+
+# Local virtual environment
+.venv/
